@@ -1,18 +1,17 @@
 # Deploying SceneHawk
 
-SceneHawk lives in **one repo** (`notLogi/CSCI499-SceneHawk-Project`) but runs
-as **two services** that talk over HTTP. One repo, two hosts:
+SceneHawk's source lives in **one GitHub repo** (`notLogi/SceneHawk-CS499-Project`)
+but runs as **two services** that talk over HTTP, on two hosts:
 
 | Piece | Folder | Host | Why |
 | --- | --- | --- | --- |
 | Website (Next.js) | repo root | **Vercel** | Static/SSR frontend + API routes — Vercel's sweet spot. |
-| Chatbot (FastAPI + Chroma) | [`chatbot/`](chatbot/) | **Render** (or Railway / Fly.io) | Long-running process that holds the vector index in memory. Not a fit for Vercel serverless. |
+| Chatbot (FastAPI + Chroma) | [`chatbot/`](chatbot/) | **Render** (free tier) | Long-running process holding the vector index in memory. Not a fit for Vercel serverless. (Koyeb / Fly.io / Railway also work — same Dockerfile.) |
 
-Separate *hosts* do not mean separate *repos*: Vercel builds the repo root and
-ignores `chatbot/` (see [.vercelignore](.vercelignore)); Render builds only the
-`chatbot/` subfolder (see [render.yaml](render.yaml)). The only wire between the
-two is one env var — the website's `CHATBOT_URL` points at the chatbot's public
-URL.
+Vercel builds the repo root and ignores `chatbot/` (see [.vercelignore](.vercelignore)).
+Render builds only the `chatbot/` subfolder (see [render.yaml](render.yaml)). The
+only wire between the two is one env var — the website's `CHATBOT_URL` points at
+the chatbot's public URL.
 
 ```
 Browser ──/chat──▶ Next.js (Vercel) ──/api/chat proxy──▶ FastAPI (Render) ──▶ Chroma + LLM
@@ -26,8 +25,8 @@ See [src/app/api/chat/route.ts](src/app/api/chat/route.ts) for the proxy and
 ## Step 1 — Deploy the chatbot (do this first; you need its URL for step 2)
 
 The [`chatbot/`](chatbot/) folder ships a `Dockerfile`, `start.sh`,
-`requirements.txt`, and a `.dockerignore`; [render.yaml](render.yaml) at the
-repo root wires it up for Render.
+`requirements.txt`, and a `.dockerignore`; [render.yaml](render.yaml) at the repo
+root wires it up for Render.
 
 **Key fact:** the Chroma index is *derived data*. [chatbot/start.sh](chatbot/start.sh)
 rebuilds it from the committed `chatbot/data/movies_rag.jsonl` (embeddings
@@ -36,8 +35,9 @@ container is stateless.
 
 ### On Render (Blueprint)
 
-1. Push this repo to GitHub.
-2. Render dashboard → **New → Blueprint** → pick the repo. It reads
+1. Push this repo to GitHub (already done).
+2. [render.com](https://render.com) → sign in with GitHub (no credit card needed
+   for the free tier) → **New → Blueprint** → pick the repo. It reads
    [render.yaml](render.yaml) and creates a Docker web service that builds only
    `chatbot/` (`dockerContext: ./chatbot`).
 3. Set the secret env vars (marked `sync: false`, so Render prompts for them):
@@ -50,12 +50,16 @@ container is stateless.
    curl https://<your-service>.onrender.com/health
    # {"status":"ok","films":995}
    ```
+   That hostname is your `CHATBOT_URL` for step 2.
 
 > The embedding model/key here **must match** how `movies_rag.jsonl` was built
 > (default `text-embedding-3-small`). A different model → wrong-dimension query
 > vectors → bad or failing retrieval.
 
-### Any Docker host instead
+### Alternatives (same Dockerfile)
+
+Koyeb, Fly.io, Railway, or any Docker host work too — point them at the
+`chatbot/` folder. To run it locally in Docker:
 
 ```bash
 cd chatbot
@@ -91,7 +95,7 @@ Two processes, two terminals, from the repo root:
 cd chatbot
 pip install -r requirements.txt
 python src/load_chroma.py          # build the index once (reads data/movies_rag.jsonl, no key needed)
-uvicorn server:app --app-dir src --port 8000
+python -m uvicorn server:app --app-dir src --port 8000   # `python -m` works even if the uvicorn shim isn't on PATH
 
 # Terminal 2 — website
 npm run dev                        # CHATBOT_URL defaults to http://127.0.0.1:8000
@@ -105,16 +109,17 @@ npm run dev                        # CHATBOT_URL defaults to http://127.0.0.1:80
 
 ## Gotchas
 
-- **Function timeout.** The proxy allows 90s for a slow LLM call
-  ([route.ts](src/app/api/chat/route.ts) `AbortSignal.timeout(90_000)`), but
-  Vercel caps serverless duration (Hobby ≈ 60s max). A slow reply can be killed
-  by Vercel before the proxy's own timeout. If you hit this, add
-  `export const maxDuration = 60;` to the route (Hobby ceiling) or upgrade the
-  plan.
-- **Render free tier sleeps.** Free services cold-start after idle, so the first
-  `/chat` after a quiet spell is slow (and may hit the timeout above). The
-  `starter` plan in [render.yaml](render.yaml) avoids this; the free tier also
-  tends to be tight on RAM for `chromadb` + `onnxruntime`.
+- **Function timeout (already handled).** [route.ts](src/app/api/chat/route.ts)
+  sets `export const maxDuration = 60` (Vercel Hobby's ceiling) and aborts its
+  upstream fetch at 55s — so a slow reply returns the proxy's friendly error
+  just before Vercel would kill the function. If you upgrade the Vercel plan you
+  can raise both.
+- **Render free tier sleeps.** The free plan spins down after ~15 min idle, so
+  the first `/chat` after a quiet spell cold-starts (~30–60s, rebuilding the
+  index on boot) and may hit the timeout above. For a live demo, hit `/health` a
+  minute beforehand to warm it up. The `starter` plan (~$7/mo) stays always-on;
+  free is otherwise fine for a demo. Free is also tight on RAM (512 MB) for
+  `chromadb` — watch the Render logs for an OOM on boot.
 - **CORS.** Only matters if something calls the FastAPI service *directly* from
   a browser. The normal path (browser → Vercel proxy → FastAPI) is
   server-to-server and unaffected. Still, set `CHATBOT_ALLOWED_ORIGINS` to your

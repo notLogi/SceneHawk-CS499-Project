@@ -11,7 +11,7 @@ services:
     # relative to this context.
     dockerfilePath: ./chatbot/Dockerfile
     dockerContext: ./chatbot
-    plan: starter # 512MB RAM; chromadb + onnxruntime are heavy, avoid the free tier
+    plan: free # 512MB RAM; spins down after ~15min idle (first request cold-starts slowly). Bump to `starter` if you need it always-on.
     healthCheckPath: /health
     autoDeploy: true
     envVars:

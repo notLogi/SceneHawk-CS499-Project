@@ -6,6 +6,10 @@ import { NextRequest, NextResponse } from "next/server";
 // and no CORS round-trip is needed. If the sidecar isn't running, the UI
 // gets a friendly message instead of a hard fetch error.
 export const dynamic = "force-dynamic";
+// Vercel caps serverless function duration (Hobby max ~60s). Set it explicitly
+// so a slow reply (or a cold-starting free-tier chatbot) fails cleanly at the
+// platform limit instead of being killed abruptly.
+export const maxDuration = 60;
 
 const CHATBOT_URL = process.env.CHATBOT_URL ?? "http://127.0.0.1:8000";
 
@@ -29,8 +33,10 @@ export async function POST(req: NextRequest) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message, ...(k ? { k } : {}) }),
-      // The LLM generation step can take a while; give it room.
-      signal: AbortSignal.timeout(90_000),
+      // The LLM generation step can take a while; give it room — but stay
+      // under maxDuration (60s) so our own catch returns a friendly message
+      // before Vercel kills the function.
+      signal: AbortSignal.timeout(55_000),
     });
 
     if (!res.ok) {
