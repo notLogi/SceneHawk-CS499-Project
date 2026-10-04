@@ -1,0 +1,3 @@
+# Keep the Python chatbot service out of the Vercel build — it deploys to
+# Render, not Vercel. Vercel only builds the Next.js app at the repo root.
+chatbot/

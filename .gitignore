@@ -36,3 +36,10 @@ next-env.d.ts
 # IDE
 .vscode/
 .idea/
+
+# Chatbot service (Python) — rebuilt/derived or secret
+chatbot/chroma_db/
+chatbot/chroma_local/
+chatbot/.env
+chatbot/**/__pycache__/
+chatbot/**/*.pyc

@@ -1,0 +1,33 @@
+# Render Blueprint for the SceneHawk chatbot service (the Python half of this
+# monorepo). Lives at the repo root because Render reads render.yaml from there,
+# but it builds only the chatbot/ subfolder.
+# In the Render dashboard: New > Blueprint, point it at this repo.
+# Docs: https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: scenehawk-chatbot
+    runtime: docker
+    # Build only the chatbot subfolder; its Dockerfile COPYs src/ and data/
+    # relative to this context.
+    dockerfilePath: ./chatbot/Dockerfile
+    dockerContext: ./chatbot
+    plan: starter # 512MB RAM; chromadb + onnxruntime are heavy, avoid the free tier
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # --- Secrets: set these in the Render dashboard, do NOT commit values. ---
+      - key: EMBED_API_KEY # embeds the user's query at request time (OpenAI/Requesty)
+        sync: false
+      - key: REQUESTY_API_KEY # generates the written recommendation
+        sync: false
+      # --- Lock the browser origins allowed to call this service directly. ---
+      # Replace with your real Vercel domain(s), comma-separated. The Next.js
+      # /api/chat proxy is server-to-server and isn't bound by CORS, but setting
+      # this keeps any direct browser calls restricted.
+      - key: CHATBOT_ALLOWED_ORIGINS
+        value: https://your-app.vercel.app
+      # Optional embedding overrides (must match how movies_rag.jsonl was built):
+      # - key: EMBED_BASE_URL
+      #   value: https://api.openai.com/v1
+      # - key: EMBED_MODEL
+      #   value: text-embedding-3-small

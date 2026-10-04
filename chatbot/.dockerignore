@@ -1,0 +1,16 @@
+# The vector index is rebuilt from data/movies_rag.jsonl at container start,
+# so never bake a local copy into the image (it'd be stale and bloat the build).
+chroma_db/
+chroma_local/
+
+# Secrets stay out of the image — set them as env vars on the host instead.
+.env
+
+# Dev cruft
+__pycache__/
+*.pyc
+.git/
+.gitignore
+.claude/
+LICENSE
+README.md

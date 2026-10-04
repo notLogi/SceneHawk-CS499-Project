@@ -1,0 +1,5 @@
+# Shell scripts and Dockerfiles run in Linux containers — CRLF endings would
+# break the shebang / parsing. Force LF regardless of the committer's OS.
+*.sh text eol=lf
+Dockerfile text eol=lf
+chatbot/start.sh text eol=lf
