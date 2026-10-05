@@ -31,7 +31,7 @@ from recommend import embed  # same embedding config used to build chroma_db (al
 
 ROOT = Path(__file__).resolve().parent.parent  # project root (src/ is one level down)
 ROUTER_URL = "https://router.requesty.ai/v1/chat/completions"
-CHAT_MODEL = os.environ.get("REQUESTY_CHAT_MODEL", "google/gemma-4-31b-it")
+CHAT_MODEL = os.environ.get("REQUESTY_CHAT_MODEL", "novita/ling-3.1-flash")
 DB_DIR = str(ROOT / "chroma_db")
 COLLECTION = "films"
 
