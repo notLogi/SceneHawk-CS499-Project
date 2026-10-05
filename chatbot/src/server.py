@@ -89,10 +89,9 @@ def generate(query: str, context: str) -> str:
         headers={"Authorization": f"Bearer {api_key}"},
         json={
             "model": CHAT_MODEL,
-            # The reply is a 2-4 film recommendation, not an essay — a smaller
-            # budget keeps responses fast (and cheap). Raise it only if you
-            # switch back to a reasoning model that needs room to "think".
-            "max_tokens": 700,
+            # Budget for the written recommendation (2-4 films). Larger values
+            # allow longer replies at some cost to latency.
+            "max_tokens": 2000,
             "temperature": 0.7,
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
