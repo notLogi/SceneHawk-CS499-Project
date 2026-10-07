@@ -1,30 +1,22 @@
 #!/usr/bin/env python3
 """
-SceneHawk dual-vector recommender.
+SceneHawk semantic recommender.
 
-Every film gets two embeddings:
-  plot vector  - the film's "text" blob (title, genres, synopsis): what it is about
-  mood vector  - the enrichment "embedding_summary" plus atmosphere/tone/emotion
-                 descriptors: what it feels like
-
-A query is scored against both:  score = alpha * mood_sim + (1 - alpha) * plot_sim
-Use a high alpha for feeling queries ("something cozy for a rainy Sunday") and a
-low alpha for content queries ("a heist movie").
+Each film is embedded once, from its "text" blob (title, genres, synopsis) -
+what the film is about. A free-text query is embedded the same way and films
+are ranked by cosine similarity to it.
 
 Build the index once (this is the only step that embeds the films):
     python recommend.py build
 
 Then ask as many questions as you like (each costs one tiny query embedding):
-    python recommend.py "something cozy for a rainy sunday"
-    python recommend.py "a slow sad film about grief" --alpha 0.85 --pool underrated
-    python recommend.py "heist" --alpha 0.2 --min-rating 7.5 --pacing brisk
+    python recommend.py "a slow sad film about grief"
+    python recommend.py "heist" --min-rating 7.5 --pool underrated
 
-For a standard RAG pipeline (one embedding per film, not the dual mood/plot
-vectors above), export flat JSONL instead:
+For a standard RAG pipeline, export flat JSONL for load_chroma.py to ingest:
     python recommend.py export-rag
     python recommend.py export-rag --out movies_rag.jsonl --limit 5   # cheap test
-Each line is {"id", "text", "embedding", "metadata"} - the combined text is the
-film's plot blended with its inferred mood, so one vector captures both.
+Each line is {"id", "text", "embedding", "metadata"}.
 
 Embedding endpoint (any OpenAI-compatible /embeddings API):
     EMBED_API_KEY   key (falls back to OPENAI_API_KEY, then REQUESTY_API_KEY)
@@ -47,7 +39,7 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parent.parent  # project root (src/ is one level down)
 load_dotenv(ROOT / ".env", override=True)  # .env wins over any stale shell env vars
 
-SOURCES = {  # pool name -> enriched JSON
+SOURCES = {  # pool name -> raw TMDB JSON
     "popular": str(ROOT / "data" / "movies_metadata.json"),
     "underrated": str(ROOT / "data" / "movies_underrated.json"),
 }
@@ -58,7 +50,6 @@ BASE_URL = os.environ.get("EMBED_BASE_URL", "https://api.openai.com/v1").rstrip(
 MODEL = os.environ.get("EMBED_MODEL", "text-embedding-3-small")
 BATCH_SIZE = 100
 MAX_RETRIES = 4
-DEFAULT_ALPHA = 0.6
 
 
 def api_key() -> str:
@@ -97,30 +88,6 @@ def embed(texts: list[str]) -> np.ndarray:
     return arr / np.linalg.norm(arr, axis=1, keepdims=True)
 
 
-def mood_text(enrichment: dict) -> str | None:
-    """The text embedded for the mood vector; None if the film wasn't enriched."""
-    if enrichment.get("status") != "ok":
-        return None
-    return (
-        f"{enrichment['embedding_summary']} "
-        f"Atmosphere: {', '.join(enrichment['atmosphere'])}. "
-        f"Tone: {', '.join(enrichment['tone'])}. "
-        f"Feelings: {', '.join(enrichment['emotional_register'])}."
-    )
-
-
-def combined_text(record: dict) -> str:
-    """Plot + mood blended into one string, for a single-vector RAG embedding."""
-    parts = [record["text"]]
-    mt = mood_text(record.get("enrichment", {}))
-    if mt:
-        parts.append(f"Mood: {mt}")
-        pacing = record["enrichment"].get("pacing")
-        if pacing:
-            parts.append(f"Pacing: {pacing}.")
-    return "\n\n".join(parts)
-
-
 def load_films() -> list[dict]:
     """All films from every source, de-duplicated by tmdb_id (first pool wins)."""
     films, seen = [], set()
@@ -140,23 +107,14 @@ def load_films() -> list[dict]:
 
 def build() -> None:
     films = load_films()
-    plot_texts = [f["text"] for f in films]
-    mood_texts = [mood_text(f.get("enrichment", {})) for f in films]
-    has_mood = np.array([t is not None for t in mood_texts])
-    print(f"{len(films)} films, {int(has_mood.sum())} with mood text. Model: {MODEL}", file=sys.stderr)
+    texts = [f["text"] for f in films]
+    print(f"{len(films)} films. Model: {MODEL}", file=sys.stderr)
+    vecs = embed(texts)
 
-    print("Embedding plot text...", file=sys.stderr)
-    plot_vecs = embed(plot_texts)
-    print("Embedding mood text...", file=sys.stderr)
-    mood_vecs = np.zeros_like(plot_vecs)
-    mood_vecs[has_mood] = embed([t for t in mood_texts if t is not None])
-    # Films with no mood text (thin synopsis) fall back to their plot vector.
-    mood_vecs[~has_mood] = plot_vecs[~has_mood]
-
-    np.savez_compressed(INDEX_FILE, plot=plot_vecs, mood=mood_vecs, has_mood=has_mood)
+    np.savez_compressed(INDEX_FILE, vec=vecs)
     meta = []
     for f in films:
-        m, e = f["metadata"], f.get("enrichment", {})
+        m = f["metadata"]
         meta.append(
             {
                 "tmdb_id": m["tmdb_id"],
@@ -167,9 +125,6 @@ def build() -> None:
                 "votes": m["vote_count"],
                 "language": m["original_language"],
                 "pool": f["pool"],
-                "pacing": e.get("pacing"),
-                "confidence": e.get("confidence"),
-                "summary": e.get("embedding_summary"),
             }
         )
     json.dump({"model": MODEL, "films": meta}, open(META_FILE, "w", encoding="utf-8"), ensure_ascii=False)
@@ -181,13 +136,13 @@ def export_rag(out_path: str, limit: int | None = None) -> None:
     films = load_films()
     if limit:
         films = films[:limit]
-    texts = [combined_text(f) for f in films]
+    texts = [f["text"] for f in films]
     print(f"{len(films)} films. Model: {MODEL}", file=sys.stderr)
     vecs = embed(texts)
 
     with open(out_path, "w", encoding="utf-8") as out:
         for f, text, vec in zip(films, texts, vecs):
-            m, e = f["metadata"], f.get("enrichment", {})
+            m = f["metadata"]
             row = {
                 "id": m["tmdb_id"],
                 "text": text,
@@ -201,13 +156,6 @@ def export_rag(out_path: str, limit: int | None = None) -> None:
                     "vote_average": m["vote_average"],
                     "vote_count": m["vote_count"],
                     "pool": f["pool"],
-                    "pacing": e.get("pacing"),
-                    "atmosphere": e.get("atmosphere"),
-                    "tone": e.get("tone"),
-                    "emotional_register": e.get("emotional_register"),
-                    "visual_style_hint": e.get("visual_style_hint"),
-                    "confidence": e.get("confidence"),
-                    "embedding_summary": e.get("embedding_summary"),
                 },
             }
             out.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -216,15 +164,12 @@ def export_rag(out_path: str, limit: int | None = None) -> None:
 
 def recommend(
     query: str,
-    alpha: float = DEFAULT_ALPHA,
     k: int = 5,
     pool: str | None = None,
     min_rating: float | None = None,
     min_year: int | None = None,
     max_year: int | None = None,
-    pacing: str | None = None,
     language: str | None = None,
-    exclude_low_confidence: bool = False,
 ) -> list[dict]:
     """Top-k films for a free-text query. Filters are hard constraints."""
     idx = np.load(INDEX_FILE)
@@ -234,9 +179,7 @@ def recommend(
     films = meta["films"]
 
     q = embed([query])[0]
-    mood_sim = idx["mood"] @ q
-    plot_sim = idx["plot"] @ q
-    score = alpha * mood_sim + (1 - alpha) * plot_sim
+    score = idx["vec"] @ q
 
     def keep(f: dict) -> bool:
         return (
@@ -244,18 +187,13 @@ def recommend(
             and (min_rating is None or f["rating"] >= min_rating)
             and (min_year is None or (f["year"] or 0) >= min_year)
             and (max_year is None or (f["year"] or 9999) <= max_year)
-            and (pacing is None or f["pacing"] == pacing)
             and (language is None or f["language"] == language)
-            and not (exclude_low_confidence and f["confidence"] == "low")
         )
 
     ranked = sorted(
         (i for i, f in enumerate(films) if keep(f)), key=lambda i: score[i], reverse=True
     )
-    return [
-        {**films[i], "score": float(score[i]), "mood_sim": float(mood_sim[i]), "plot_sim": float(plot_sim[i])}
-        for i in ranked[:k]
-    ]
+    return [{**films[i], "score": float(score[i])} for i in ranked[:k]]
 
 
 def main() -> None:
@@ -263,21 +201,17 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument(
         "query",
-        help='"build" to (re)build the mood-recommender index, "export-rag" to '
+        help='"build" to (re)build the recommender index, "export-rag" to '
         "write flat JSONL embeddings, otherwise a free-text query",
     )
     p.add_argument("--out", default=str(ROOT / "data" / "movies_rag.jsonl"), help="export-rag: output JSONL path")
     p.add_argument("--limit", type=int, default=None, help="export-rag: only embed the first N films (cheap test)")
-    p.add_argument("--alpha", type=float, default=DEFAULT_ALPHA,
-                   help="mood weight 0-1 (default %(default)s); 1 = feeling only, 0 = plot only")
     p.add_argument("-k", type=int, default=5, help="number of results")
     p.add_argument("--pool", choices=list(SOURCES), help="restrict to one pool")
     p.add_argument("--min-rating", type=float)
     p.add_argument("--min-year", type=int)
     p.add_argument("--max-year", type=int)
-    p.add_argument("--pacing", choices=["slow-burn", "deliberate", "moderate", "brisk", "frenetic"])
     p.add_argument("--language", help="original language code, e.g. en, ja, ko")
-    p.add_argument("--skip-low-confidence", action="store_true")
     args = p.parse_args()
 
     if args.query == "build":
@@ -287,16 +221,13 @@ def main() -> None:
         export_rag(args.out, args.limit)
         return
     results = recommend(
-        args.query, args.alpha, args.k, args.pool, args.min_rating, args.min_year,
-        args.max_year, args.pacing, args.language, args.skip_low_confidence,
+        args.query, args.k, args.pool, args.min_rating, args.min_year,
+        args.max_year, args.language,
     )
     if not results:
         print("No films match those filters.")
     for n, r in enumerate(results, 1):
-        print(f"{n}. {r['title']} ({r['year']})  [{r['pool']}, {r['rating']:.1f}★, {r['pacing'] or '-'}]"
-              f"  score {r['score']:.3f} (mood {r['mood_sim']:.3f} / plot {r['plot_sim']:.3f})")
-        if r["summary"]:
-            print(f"     {r['summary']}")
+        print(f"{n}. {r['title']} ({r['year']})  [{r['pool']}, {r['rating']:.1f}★]  score {r['score']:.3f}")
 
 
 if __name__ == "__main__":

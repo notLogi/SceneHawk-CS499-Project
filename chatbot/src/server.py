@@ -125,7 +125,7 @@ def chat(req: ChatRequest) -> dict:
     films = retrieve(message, req.k)
     if not films:
         return {
-            "reply": "I couldn't find anything in the index for that. Try describing a mood, pacing, or feeling.",
+            "reply": "I couldn't find anything in the index for that. Try describing the kind of film you're after.",
             "films": [],
         }
 
@@ -138,9 +138,7 @@ def chat(req: ChatRequest) -> dict:
                 "title": f["metadata"].get("title"),
                 "year": f["metadata"].get("release_year"),
                 "rating": f["metadata"].get("vote_average"),
-                "pacing": f["metadata"].get("pacing"),
                 "pool": f["metadata"].get("pool"),
-                "summary": f["metadata"].get("embedding_summary"),
                 "similarity": round(f["similarity"], 3),
             }
             for f in films

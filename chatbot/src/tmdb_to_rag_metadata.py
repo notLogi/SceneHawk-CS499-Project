@@ -31,7 +31,13 @@ import os
 import sys
 import json
 import time
+from pathlib import Path
+
 import requests
+from dotenv import load_dotenv
+
+ROOT = Path(__file__).resolve().parent.parent  # project root (src/ is one level down)
+load_dotenv(ROOT / ".env")  # read keys from chatbot/.env, same as the sibling scripts
 
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY")
 BASE_URL = "https://api.themoviedb.org/3"
@@ -39,11 +45,12 @@ TARGET_COUNT = 500
 PAGE_SIZE = 20  # fixed by TMDB
 SOURCE_ENDPOINT = "discover/movie"  # swap for "movie/top_rated" or "discover/movie" as needed
 
-OUTPUT_FILE = "movies_metadata.json"
+DATA_DIR = ROOT / "data"
+OUTPUT_FILE = str(DATA_DIR / "movies_metadata.json")
 
 # --underrated: well rated, but few people have rated them. The vote_count floor
 # keeps out films with a handful of votes, where a 9.0 average means nothing.
-UNDERRATED_OUTPUT_FILE = "movies_underrated.json"
+UNDERRATED_OUTPUT_FILE = str(DATA_DIR / "movies_underrated.json")
 UNDERRATED_PARAMS = {
     "sort_by": "vote_average.desc",
     "vote_average.gte": 7.5,

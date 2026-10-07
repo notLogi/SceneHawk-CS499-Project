@@ -4,7 +4,7 @@ SceneHawk chat: ask for a recommendation in plain English, get a written
 answer grounded in retrieved films - not just a ranked list.
 
 This is the "generation" half of RAG. Retrieval (load_chroma.py) already
-finds candidate films by mood+plot similarity; this script hands those
+finds candidate films by semantic similarity; this script hands those
 candidates to an LLM (via Requesty) and asks it to write an actual
 recommendation, explaining why each pick fits the request.
 
@@ -36,8 +36,8 @@ DB_DIR = str(ROOT / "chroma_db")
 COLLECTION = "films"
 
 SYSTEM_PROMPT = """You are a film recommendation assistant. You are given a user's \
-request and a CONTEXT list of candidate films retrieved from a mood-aware search \
-(each with title, year, rating, pacing, an inferred mood summary, and a short synopsis).
+request and a CONTEXT list of candidate films retrieved by semantic search \
+(each with title, year, rating, and a short synopsis).
 
 Recommend only films that appear in CONTEXT - never invent a film that isn't listed. \
 Pick the best 2-4 matches, ranked best first.
@@ -46,8 +46,8 @@ Output plain text only - NO Markdown, no asterisks, no bold. This is read in a \
 terminal, so formatting characters show up as literal symbols. Format each pick \
 as a numbered entry laid out exactly like this:
 
-1. Title (Year)  -  rating stars, pacing
-   Why it fits: one or two sentences referencing its mood, pacing, and plot.
+1. Title (Year)  -  rating stars
+   Why it fits: one or two sentences referencing its plot and themes.
 
 Leave a blank line between entries. Start with a single short intro line (e.g. \
 "Here are the best matches for a tense heist:"). If nothing in CONTEXT fits well, \
@@ -70,9 +70,7 @@ def build_context(films: list[dict]) -> str:
     for f in films:
         m = f["metadata"]
         blocks.append(
-            f"- {m['title']} ({m['release_year']}) [{m['pool']}, {m['vote_average']}★, "
-            f"pacing: {m['pacing'] or 'unknown'}]\n"
-            f"  Mood: {m.get('embedding_summary', '')}\n"
+            f"- {m['title']} ({m['release_year']}) [{m['pool']}, {m['vote_average']}★]\n"
             f"  Synopsis: {f['text'][:300]}"
         )
     return "\n\n".join(blocks)

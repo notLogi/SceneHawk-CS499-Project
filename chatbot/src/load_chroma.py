@@ -86,9 +86,7 @@ def query(text: str, k: int = 5) -> None:
     ):
         sim = 1 - dist  # cosine distance -> similarity
         print(f"{i}. {meta['title']} ({meta['release_year']})  [{meta['pool']}, "
-              f"{meta['vote_average']}★, {meta['pacing'] or '-'}]  sim {sim:.3f}")
-        if meta.get("embedding_summary"):
-            print(f"     {meta['embedding_summary']}")
+              f"{meta['vote_average']}★]  sim {sim:.3f}")
 
 
 def main() -> None:
