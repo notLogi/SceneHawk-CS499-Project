@@ -17,6 +17,11 @@ of films, each with the reason it matches. It handles three kinds of request:
 - **Story** — "a heist that goes wrong"
 - **Both, with or without a genre** — "a hopeful sci-fi about first contact"
 
+- Personalized discovery:** Helps users find films based on mood, atmosphere, and emotional experience rather than relying only on genres or plot summaries.
+- Transparent recommendations:** Provides matching scores and review evidence so users can understand why each film was recommended.
+- Research-driven design:** Combines a fine-tuned feelings model with story matching and systematic evaluation against general-purpose chatbots.
+- 
+
 ## Why not just ask a chatbot?
 
 A general LLM knows a little about every film and answers from memory. It has
@@ -41,7 +46,7 @@ There are two halves. The **build** half runs ahead of time and fills the
 database. The **query** half runs each time someone asks for a film.
 
 ### Build: filling the database (offline)
-
+ 
 ```
 Reviews ──▶ Feelings model (ours) ──▶ scores per review ──▶ average per film ──▶ FEELINGS TABLE
 
